@@ -1783,7 +1783,7 @@ mod tests {
         as_struct_array,
     };
     use arrow_buffer::ToByteSlice;
-    use arrow_schema::DataType::{Dictionary, List};
+    use arrow_schema::DataType::{Decimal128, Dictionary, List};
     use flate2::read::GzDecoder;
     use std::fs::File;
     use std::io::Cursor;
@@ -1845,6 +1845,43 @@ mod tests {
         assert_eq!("4", dd.value(0));
         assert_eq!("text", dd.value(8));
     }
+
+    #[test]
+    fn test_json_basic_decimal() {
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("b", Decimal128Type::DEFAULT_TYPE, false)
+        ]));
+
+        let builder = ReaderBuilder::new().with_schema(schema.clone()).with_batch_size(64);
+        let mut reader: Reader<File> = builder
+            .build::<File>(File::open("test/data/basic.json").unwrap())
+            .unwrap();
+        let batch = reader.next().unwrap().unwrap();
+
+        assert_eq!(1, batch.num_columns());
+        assert_eq!(12, batch.num_rows());
+
+        let schema = batch.schema();
+
+        let b = schema.column_with_name("b").unwrap();
+
+        let bb = batch
+            .column(b.0)
+            .as_any()
+            .downcast_ref::<PrimitiveArray<Decimal128Type>>()
+            .unwrap();
+
+        assert_eq!(12, bb.len());
+
+        assert_eq!(
+            Decimal128Type::format_decimal(bb.value(0), Decimal128Type::MAX_PRECISION, DECIMAL_DEFAULT_SCALE),
+            "2.0"
+        );
+
+        assert_eq!(20 as i128, bb.value(0));
+        assert_eq!(6 as i128, bb.value(5));
+    }
+
 
     #[test]
     fn test_json_empty_projection() {
@@ -2096,42 +2133,6 @@ mod tests {
         assert!(!cc.value(0));
         assert!(!cc.value(4));
         assert!(!cc.is_valid(5));
-    }
-
-    #[test]
-    fn test_json_arrays_decimal() {
-
-        let schema = Arc::new(Schema::new(vec![
-            Field::new("b", DataType::Decimal128(10, 30), false)
-        ]));
-
-        let builder = ReaderBuilder::new().with_schema(schema.clone()).with_batch_size(64);
-        let mut reader: Reader<File> = builder
-            .build::<File>(File::open("test/data/basic.json").unwrap())
-            .unwrap();
-        let batch = reader.next().unwrap().unwrap();
-
-        assert_eq!(1, batch.num_columns());
-        assert_eq!(12, batch.num_rows());
-
-        let schema = batch.schema();
-
-        let b = schema.column_with_name("b").unwrap();
-        assert_eq!(
-            &DataType::Decimal128(10, 30),
-            b.1.data_type()
-        );
-
-        let bb = batch
-            .column(b.0)
-            .as_any()
-            .downcast_ref::<PrimitiveArray<Decimal128Type>>()
-            .unwrap();
-
-
-        assert_eq!(12, bb.len());
-        assert_eq!(20 as i128, bb.value(0));
-        assert_eq!(6 as i128, bb.value(5));
     }
 
     #[test]

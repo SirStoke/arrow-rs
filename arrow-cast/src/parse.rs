@@ -17,9 +17,10 @@
 
 use arrow_array::types::*;
 use arrow_array::{ArrowNativeTypeOp, ArrowPrimitiveType};
-use arrow_schema::ArrowError;
+use arrow_schema::{ArrowError, DECIMAL_DEFAULT_SCALE};
 use chrono::prelude::*;
 use arrow_buffer::i256;
+use crate::cast::DecimalCast;
 
 /// Accepts a string in RFC3339 / ISO8601 standard format and some
 /// variants and converts it to a nanosecond precision timestamp.
@@ -480,7 +481,13 @@ fn parse_string_to_decimal_native<T: DecimalType>(
 
 impl Parser for Decimal128Type {
     fn parse(string: &str) -> Option<Self::Native> {
-        parse_string_to_decimal_native(string, Self::SCALE).ok()
+        parse_string_to_decimal_native::<Decimal128Type>(string, DECIMAL_DEFAULT_SCALE as usize).ok()
+    }
+}
+
+impl Parser for Decimal256Type {
+    fn parse(string: &str) -> Option<Self::Native> {
+        parse_string_to_decimal_native::<Decimal256Type>(string, Self::MAX_SCALE as usize).ok()
     }
 }
 
@@ -966,5 +973,28 @@ mod tests {
         parse_timestamp("1677-06-14T07:29:01.256")
             .map_err(|e| assert!(e.to_string().ends_with(ERR_NANOSECONDS_NOT_SUPPORTED)))
             .unwrap_err();
+    }
+
+    #[test]
+    fn parse_decimal_string() {
+        assert_eq!(
+            Decimal128Type::parse("2.0"),
+            Some(20_000_000_000)
+        );
+
+        assert_eq!(
+            Decimal128Type::parse("123.45"),
+            Some(1_234_500_000_000)
+        );
+
+        assert_eq!(
+            Decimal128Type::parse("-123.45"),
+            Some(-1_234_500_000_000)
+        );
+
+        assert_eq!(
+            Decimal128Type::parse("-0"),
+            Some(0)
+        );
     }
 }

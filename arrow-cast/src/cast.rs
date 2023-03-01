@@ -1969,7 +1969,7 @@ const fn time_unit_multiple(unit: &TimeUnit) -> i64 {
 
 /// A utility trait that provides checked conversions between
 /// decimal types inspired by [`NumCast`]
-trait DecimalCast: Sized {
+pub(crate) trait DecimalCast: Sized {
     fn to_i128(self) -> Option<i128>;
 
     fn to_i256(self) -> Option<i256>;
