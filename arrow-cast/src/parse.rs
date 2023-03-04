@@ -20,7 +20,7 @@ use arrow_array::{ArrowNativeTypeOp, ArrowPrimitiveType};
 use arrow_schema::{ArrowError, DECIMAL_DEFAULT_SCALE};
 use chrono::prelude::*;
 use arrow_buffer::i256;
-use crate::cast::DecimalCast;
+use crate::cast::{DecimalCast, parse_string_to_decimal_native};
 
 /// Accepts a string in RFC3339 / ISO8601 standard format and some
 /// variants and converts it to a nanosecond precision timestamp.
@@ -396,89 +396,6 @@ impl Parser for Time32SecondType {
     }
 }
 
-/// Parses given string to specified decimal native (i128/i256) based on given
-/// scale. Returns an `Err` if it cannot parse given string.
-fn parse_string_to_decimal_native<T: DecimalType>(
-    value_str: &str,
-    scale: usize,
-) -> Result<T::Native, ArrowError>
-    where
-        T::Native: DecimalCast + ArrowNativeTypeOp,
-{
-    let value_str = value_str.trim();
-    let parts: Vec<&str> = value_str.split('.').collect();
-    if parts.len() > 2 {
-        return Err(ArrowError::InvalidArgumentError(format!(
-            "Invalid decimal format: {value_str:?}"
-        )));
-    }
-
-    let integers = parts[0].trim_start_matches('0');
-    let decimals = if parts.len() == 2 { parts[1] } else { "" };
-
-    // Adjust decimal based on scale
-    let number_decimals = if decimals.len() > scale {
-        let decimal_number = i256::from_string(decimals).ok_or_else(|| {
-            ArrowError::InvalidArgumentError(format!(
-                "Cannot parse decimal format: {value_str}"
-            ))
-        })?;
-
-        let div =
-            i256::from_i128(10_i128).pow_checked((decimals.len() - scale) as u32)?;
-
-        let half = div.div_wrapping(i256::from_i128(2));
-        let half_neg = half.neg_wrapping();
-
-        let d = decimal_number.div_wrapping(div);
-        let r = decimal_number.mod_wrapping(div);
-
-        // Round result
-        let adjusted = match decimal_number >= i256::ZERO {
-            true if r >= half => d.add_wrapping(i256::ONE),
-            false if r <= half_neg => d.sub_wrapping(i256::ONE),
-            _ => d,
-        };
-
-        let integers = if !integers.is_empty() {
-            i256::from_string(integers)
-                .ok_or_else(|| {
-                    ArrowError::InvalidArgumentError(format!(
-                        "Cannot parse decimal format: {value_str}"
-                    ))
-                })
-                .map(|v| {
-                    v.mul_wrapping(i256::from_i128(10_i128).pow_wrapping(scale as u32))
-                })?
-        } else {
-            i256::ZERO
-        };
-
-        format!("{}", integers.add_wrapping(adjusted))
-    } else {
-        let padding = if scale > decimals.len() { scale } else { 0 };
-
-        let decimals = format!("{decimals:0<padding$}");
-        format!("{integers}{decimals}")
-    };
-
-    let value = i256::from_string(number_decimals.as_str()).ok_or_else(|| {
-        ArrowError::InvalidArgumentError(format!(
-            "Cannot convert {} to {}: Overflow",
-            value_str,
-            T::PREFIX
-        ))
-    })?;
-
-    T::Native::from_decimal(value).ok_or_else(|| {
-        ArrowError::InvalidArgumentError(format!(
-            "Cannot convert {} to {}",
-            value_str,
-            T::PREFIX
-        ))
-    })
-}
-
 impl Parser for Decimal128Type {
     fn parse(string: &str) -> Option<Self::Native> {
         parse_string_to_decimal_native::<Decimal128Type>(string, DECIMAL_DEFAULT_SCALE as usize).ok()
@@ -487,7 +404,7 @@ impl Parser for Decimal128Type {
 
 impl Parser for Decimal256Type {
     fn parse(string: &str) -> Option<Self::Native> {
-        parse_string_to_decimal_native::<Decimal256Type>(string, Self::MAX_SCALE as usize).ok()
+        parse_string_to_decimal_native::<Decimal256Type>(string, DECIMAL_DEFAULT_SCALE as usize).ok()
     }
 }
 
@@ -976,25 +893,71 @@ mod tests {
     }
 
     #[test]
-    fn parse_decimal_string() {
+    fn string_to_decimal() {
         assert_eq!(
-            Decimal128Type::parse("2.0"),
-            Some(20_000_000_000)
+            Decimal128Type::format_decimal(
+                Decimal128Type::parse("123.45").unwrap(),
+                38,
+                DECIMAL_DEFAULT_SCALE,
+            ),
+            "123.4500000000"
+        );
+        assert_eq!(
+            Decimal128Type::format_decimal(
+                Decimal128Type::parse("12345").unwrap(),
+                38,
+                DECIMAL_DEFAULT_SCALE
+            ),
+            "12345.0000000000"
+        );
+        assert_eq!(
+            Decimal128Type::format_decimal(
+                Decimal128Type::parse("0.12345678912").unwrap(),
+                38,
+                DECIMAL_DEFAULT_SCALE,
+            ),
+            "0.1234567891"
+        );
+        assert_eq!(
+            Decimal128Type::format_decimal(
+                Decimal128Type::parse(".12345678916").unwrap(),
+                38,
+                DECIMAL_DEFAULT_SCALE
+            ),
+            "0.1234567892"
         );
 
         assert_eq!(
-            Decimal128Type::parse("123.45"),
-            Some(1_234_500_000_000)
+            Decimal256Type::format_decimal(
+                Decimal256Type::parse("123.45").unwrap(),
+                38,
+                DECIMAL_DEFAULT_SCALE
+            ),
+            "123.4500000000"
         );
-
         assert_eq!(
-            Decimal128Type::parse("-123.45"),
-            Some(-1_234_500_000_000)
+            Decimal256Type::format_decimal(
+                Decimal256Type::parse("12345").unwrap(),
+                38,
+                DECIMAL_DEFAULT_SCALE
+            ),
+            "12345.0000000000"
         );
-
         assert_eq!(
-            Decimal128Type::parse("-0"),
-            Some(0)
+            Decimal256Type::format_decimal(
+                Decimal256Type::parse("0.12345678912").unwrap(),
+                38,
+                DECIMAL_DEFAULT_SCALE
+            ),
+            "0.1234567891"
+        );
+        assert_eq!(
+            Decimal256Type::format_decimal(
+                Decimal256Type::parse("0.12345678915").unwrap(),
+                38,
+                DECIMAL_DEFAULT_SCALE
+            ),
+            "0.1234567892"
         );
     }
 }
