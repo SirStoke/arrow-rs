@@ -16,11 +16,10 @@
 // under the License.
 
 use arrow_array::types::*;
-use arrow_array::{ArrowNativeTypeOp, ArrowPrimitiveType};
-use arrow_schema::{ArrowError, DECIMAL_DEFAULT_SCALE};
+use arrow_array::ArrowPrimitiveType;
+use arrow_schema::ArrowError;
 use chrono::prelude::*;
-use arrow_buffer::i256;
-use crate::cast::{DecimalCast, parse_string_to_decimal_native};
+use crate::cast::{parse_string_to_decimal_native};
 
 /// Accepts a string in RFC3339 / ISO8601 standard format and some
 /// variants and converts it to a nanosecond precision timestamp.
@@ -396,15 +395,25 @@ impl Parser for Time32SecondType {
     }
 }
 
-impl Parser for Decimal128Type {
-    fn parse(string: &str) -> Option<Self::Native> {
-        parse_string_to_decimal_native::<Decimal128Type>(string, DECIMAL_DEFAULT_SCALE as usize).ok()
+/// Specialized parsing implementations
+/// used by csv and json reader
+pub trait DecimalParser: DecimalType {
+    fn parse_decimal(string: &str, scale: i8) -> Option<Self::Native>;
+
+    fn parse_formatted_decimal(string: &str, _format: &str, scale: i8) -> Option<Self::Native> {
+        Self::parse_decimal(string, scale)
     }
 }
 
-impl Parser for Decimal256Type {
-    fn parse(string: &str) -> Option<Self::Native> {
-        parse_string_to_decimal_native::<Decimal256Type>(string, DECIMAL_DEFAULT_SCALE as usize).ok()
+impl DecimalParser for Decimal128Type {
+    fn parse_decimal(string: &str, scale: i8) -> Option<Self::Native> {
+        parse_string_to_decimal_native::<Decimal128Type>(string, scale as usize).ok()
+    }
+}
+
+impl DecimalParser for Decimal256Type {
+    fn parse_decimal(string: &str, scale: i8) -> Option<Self::Native> {
+        parse_string_to_decimal_native::<Decimal256Type>(string, scale as usize).ok()
     }
 }
 
@@ -896,68 +905,92 @@ mod tests {
     fn string_to_decimal() {
         assert_eq!(
             Decimal128Type::format_decimal(
-                Decimal128Type::parse("123.45").unwrap(),
+                Decimal128Type::parse_decimal("123.45", 2).unwrap(),
                 38,
-                DECIMAL_DEFAULT_SCALE,
+                2,
             ),
-            "123.4500000000"
+            "123.45"
         );
         assert_eq!(
             Decimal128Type::format_decimal(
-                Decimal128Type::parse("12345").unwrap(),
+                Decimal128Type::parse_decimal("12345", 2).unwrap(),
                 38,
-                DECIMAL_DEFAULT_SCALE
+                2
             ),
-            "12345.0000000000"
+            "12345.00"
         );
         assert_eq!(
             Decimal128Type::format_decimal(
-                Decimal128Type::parse("0.12345678912").unwrap(),
+                Decimal128Type::parse_decimal("0.12345", 2).unwrap(),
                 38,
-                DECIMAL_DEFAULT_SCALE,
+                2
             ),
-            "0.1234567891"
+            "0.12"
         );
         assert_eq!(
             Decimal128Type::format_decimal(
-                Decimal128Type::parse(".12345678916").unwrap(),
+                Decimal128Type::parse_decimal(".12345", 2).unwrap(),
                 38,
-                DECIMAL_DEFAULT_SCALE
+                2
             ),
-            "0.1234567892"
+            "0.12"
+        );
+        assert_eq!(
+            Decimal128Type::format_decimal(
+                Decimal128Type::parse_decimal(".1265", 2).unwrap(),
+                38,
+                2
+            ),
+            "0.13"
+        );
+        assert_eq!(
+            Decimal128Type::format_decimal(
+                Decimal128Type::parse_decimal(".1265", 2).unwrap(),
+                38,
+                2
+            ),
+            "0.13"
         );
 
         assert_eq!(
             Decimal256Type::format_decimal(
-                Decimal256Type::parse("123.45").unwrap(),
+                Decimal256Type::parse_decimal("123.45", 3).unwrap(),
                 38,
-                DECIMAL_DEFAULT_SCALE
+                3
             ),
-            "123.4500000000"
+            "123.450"
         );
         assert_eq!(
             Decimal256Type::format_decimal(
-                Decimal256Type::parse("12345").unwrap(),
+                Decimal256Type::parse_decimal("12345", 3).unwrap(),
                 38,
-                DECIMAL_DEFAULT_SCALE
+                3
             ),
-            "12345.0000000000"
+            "12345.000"
         );
         assert_eq!(
             Decimal256Type::format_decimal(
-                Decimal256Type::parse("0.12345678912").unwrap(),
+                Decimal256Type::parse_decimal("0.12345", 3).unwrap(),
                 38,
-                DECIMAL_DEFAULT_SCALE
+                3
             ),
-            "0.1234567891"
+            "0.123"
         );
         assert_eq!(
             Decimal256Type::format_decimal(
-                Decimal256Type::parse("0.12345678915").unwrap(),
+                Decimal256Type::parse_decimal(".12345", 3).unwrap(),
                 38,
-                DECIMAL_DEFAULT_SCALE
+                3
             ),
-            "0.1234567892"
+            "0.123"
+        );
+        assert_eq!(
+            Decimal256Type::format_decimal(
+                Decimal256Type::parse_decimal(".1265", 3).unwrap(),
+                38,
+                3
+            ),
+            "0.127"
         );
     }
 }

@@ -59,7 +59,7 @@ use arrow_array::builder::*;
 use arrow_array::types::*;
 use arrow_array::*;
 use arrow_buffer::{bit_util, Buffer, MutableBuffer};
-use arrow_cast::parse::Parser;
+use arrow_cast::parse::{Parser, DecimalParser};
 use arrow_data::{ArrayData, ArrayDataBuilder};
 use arrow_schema::*;
 
@@ -1019,6 +1019,44 @@ impl Decoder {
         ))
     }
 
+    fn build_decimal_array<T: DecimalParser>(
+        &self,
+        rows: &[Value],
+        col_name: &str,
+        scale: i8
+    ) -> Result<ArrayRef, ArrowError>
+    where T::Native: num::NumCast
+    {
+        let format_string = self
+            .options
+            .format_strings
+            .as_ref()
+            .and_then(|fmts| fmts.get(col_name));
+
+        Ok(Arc::new(
+            rows.iter()
+                .map(|row| {
+                    row.get(col_name).and_then(|value| {
+                        if value.is_i64() {
+                            value.as_i64().and_then(num::cast::cast)
+                        } else if value.is_u64() {
+                            value.as_u64().and_then(num::cast::cast)
+                        } else if value.is_string() {
+                            match format_string {
+                                Some(fmt) => {
+                                    T::parse_formatted_decimal(value.as_str().unwrap(), fmt, scale)
+                                }
+                                None => T::parse_decimal(value.as_str().unwrap(), scale),
+                            }
+                        } else {
+                            value.as_f64().and_then(num::cast::cast)
+                        }
+                    })
+                })
+                .collect::<PrimitiveArray<T>>(),
+        ))
+    }
+
     /// Build a nested GenericListArray from a list of unnested `Value`s
     fn build_nested_list_array<OffsetSize: OffsetSizeTrait>(
         &self,
@@ -1379,10 +1417,18 @@ impl Decoder {
                         field.data_type(),
                         map_field,
                     ),
-                    DataType::Decimal128(_, _) => {
-                        self.build_primitive_array::<Decimal128Type>(
+                    DataType::Decimal128(_, scale) => {
+                        self.build_decimal_array::<Decimal128Type>(
                             rows,
-                            field.name()
+                            field.name(),
+                            *scale
+                        )
+                    },
+                    DataType::Decimal256(_, scale) => {
+                        self.build_decimal_array::<Decimal128Type>(
+                            rows,
+                            field.name(),
+                            *scale
                         )
                     }
                     _ => Err(ArrowError::JsonError(format!(
@@ -1783,7 +1829,7 @@ mod tests {
         as_struct_array,
     };
     use arrow_buffer::ToByteSlice;
-    use arrow_schema::DataType::{Decimal128, Dictionary, List};
+    use arrow_schema::DataType::{Dictionary, List};
     use flate2::read::GzDecoder;
     use std::fs::File;
     use std::io::Cursor;
