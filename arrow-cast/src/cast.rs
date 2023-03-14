@@ -1969,7 +1969,7 @@ const fn time_unit_multiple(unit: &TimeUnit) -> i64 {
 
 /// A utility trait that provides checked conversions between
 /// decimal types inspired by [`NumCast`]
-trait DecimalCast: Sized {
+pub trait DecimalCast: Sized {
     fn to_i128(self) -> Option<i128>;
 
     fn to_i256(self) -> Option<i256>;
@@ -2662,7 +2662,7 @@ where
 
 /// Parses given string to specified decimal native (i128/i256) based on given
 /// scale. Returns an `Err` if it cannot parse given string.
-fn parse_string_to_decimal_native<T: DecimalType>(
+pub fn parse_string_to_decimal_native<T: DecimalType>(
     value_str: &str,
     scale: usize,
 ) -> Result<T::Native, ArrowError>

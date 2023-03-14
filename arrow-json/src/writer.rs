@@ -108,9 +108,9 @@ use arrow_schema::*;
 use arrow_cast::display::{ArrayFormatter, FormatOptions};
 
 fn primitive_array_to_json<T>(array: &ArrayRef) -> Result<Vec<Value>, ArrowError>
-where
-    T: ArrowPrimitiveType,
-    T::Native: JsonSerializable,
+    where
+        T: ArrowPrimitiveType,
+        T::Native: JsonSerializable,
 {
     Ok(as_primitive_array::<T>(array)
         .iter()
@@ -238,6 +238,29 @@ fn set_column_by_primitive_type<T>(
         });
 }
 
+fn set_decimal_column<T>(
+    rows: &mut [JsonMap<String, Value>],
+    row_count: usize,
+    array: &ArrayRef,
+    col_name: &str,
+    precision: u8,
+    scale: i8,
+) where
+    T: DecimalType
+{
+    let primitive_arr = as_primitive_array::<T>(array);
+
+    rows.iter_mut()
+        .zip(primitive_arr.iter())
+        .take(row_count)
+        .for_each(|(row, maybe_value)| {
+            // when value is null, we simply skip setting the key
+            if let Some(j) = maybe_value {
+                row.insert(col_name.to_string(), Value::String(T::format_decimal(j, precision, scale)));
+            }
+        });
+}
+
 fn set_column_for_json_rows(
     rows: &mut [JsonMap<String, Value>],
     row_count: usize,
@@ -283,6 +306,12 @@ fn set_column_for_json_rows(
         }
         DataType::Utf8 => {
             set_column_by_array_type!(as_string_array, col_name, rows, array, row_count);
+        }
+        DataType::Decimal128(precision, scale) => {
+            set_decimal_column::<Decimal128Type>(rows, row_count, array, col_name, *precision, *scale);
+        }
+        DataType::Decimal256(precision, scale) => {
+            set_decimal_column::<Decimal256Type>(rows, row_count, array, col_name, *precision, *scale);
         }
         DataType::LargeUtf8 => {
             set_column_by_array_type!(
@@ -397,7 +426,7 @@ fn set_column_for_json_rows(
             return Err(ArrowError::JsonError(format!(
                 "data type {:?} not supported in nested map for json writer",
                 array.data_type()
-            )))
+            )));
         }
     }
     Ok(())
@@ -519,9 +548,9 @@ pub type ArrayWriter<W> = Writer<W, JsonArray>;
 /// controlled by the [`JsonFormat`] type parameter.
 #[derive(Debug)]
 pub struct Writer<W, F>
-where
-    W: Write,
-    F: JsonFormat,
+    where
+        W: Write,
+        F: JsonFormat,
 {
     /// Underlying writer to use to write bytes
     writer: W,
@@ -537,9 +566,9 @@ where
 }
 
 impl<W, F> Writer<W, F>
-where
-    W: Write,
-    F: JsonFormat,
+    where
+        W: Write,
+        F: JsonFormat,
 {
     /// Construct a new writer
     pub fn new(writer: W) -> Self {
@@ -610,6 +639,7 @@ mod tests {
     use arrow_buffer::{Buffer, ToByteSlice};
     use arrow_data::ArrayData;
     use serde_json::json;
+    use arrow_cast::cast::parse_string_to_decimal_native;
 
     use super::*;
 
@@ -712,8 +742,8 @@ mod tests {
             None,
             Some("cupcakes"),
         ]
-        .into_iter()
-        .collect();
+            .into_iter()
+            .collect();
         let b: DictionaryArray<Int8Type> =
             vec![Some("sdsd"), Some("sdsd"), None, Some("sd"), Some("sdsd")]
                 .into_iter()
@@ -776,7 +806,7 @@ mod tests {
                 Arc::new(arr_names),
             ],
         )
-        .unwrap();
+            .unwrap();
 
         let mut buf = Vec::new();
         {
@@ -835,7 +865,7 @@ mod tests {
                 Arc::new(arr_names),
             ],
         )
-        .unwrap();
+            .unwrap();
 
         let mut buf = Vec::new();
         {
@@ -881,7 +911,7 @@ mod tests {
                 Arc::new(arr_names),
             ],
         )
-        .unwrap();
+            .unwrap();
 
         let mut buf = Vec::new();
         {
@@ -924,7 +954,7 @@ mod tests {
                 Arc::new(arr_names),
             ],
         )
-        .unwrap();
+            .unwrap();
 
         let mut buf = Vec::new();
         {
@@ -936,6 +966,58 @@ mod tests {
             &buf,
             r#"{"time32sec":"00:02:00","time32msec":"00:00:00.120","time64usec":"00:00:00.000120","time64nsec":"00:00:00.000000120","name":"a"}
 {"name":"b"}
+"#,
+        );
+    }
+
+    #[test]
+    fn write_decimals() {
+        let arr_decimal128 = Decimal128Array::from(vec![
+            Some(parse_string_to_decimal_native::<Decimal128Type>("123.456", DECIMAL_DEFAULT_SCALE as usize).unwrap()),
+            Some(parse_string_to_decimal_native::<Decimal128Type>("-123.456", DECIMAL_DEFAULT_SCALE as usize).unwrap()),
+            Some(parse_string_to_decimal_native::<Decimal128Type>("0", DECIMAL_DEFAULT_SCALE as usize).unwrap()),
+            Some(parse_string_to_decimal_native::<Decimal128Type>("0.00", DECIMAL_DEFAULT_SCALE as usize).unwrap()),
+            None,
+        ]);
+
+        let arr_decimal256 = Decimal256Array::from(vec![
+            Some(parse_string_to_decimal_native::<Decimal256Type>("123.456", DECIMAL_DEFAULT_SCALE as usize).unwrap()),
+            Some(parse_string_to_decimal_native::<Decimal256Type>("-123.456", DECIMAL_DEFAULT_SCALE as usize).unwrap()),
+            Some(parse_string_to_decimal_native::<Decimal256Type>("0", DECIMAL_DEFAULT_SCALE as usize).unwrap()),
+            Some(parse_string_to_decimal_native::<Decimal256Type>("0.00", DECIMAL_DEFAULT_SCALE as usize).unwrap()),
+            None,
+        ]);
+
+        let schema = Schema::new(vec![
+            Field::new("decimal128", arr_decimal128.data_type().clone(), true),
+            Field::new("decimal256", arr_decimal256.data_type().clone(), true),
+        ]);
+        let schema = Arc::new(schema);
+
+        let batch = RecordBatch::try_new(
+            schema,
+            vec![
+                Arc::new(arr_decimal128),
+                Arc::new(arr_decimal256),
+            ],
+        )
+            .unwrap();
+
+        let mut buf = Vec::new();
+        {
+            let mut writer = LineDelimitedWriter::new(&mut buf);
+            writer.write_batches(&[batch]).unwrap();
+        }
+
+        println!("{}", String::from_utf8(buf.clone()).unwrap());
+
+        assert_json_eq(
+            &buf,
+            r#"{"decimal128":"123.4560000000","decimal256":"123.4560000000"}
+{"decimal128":"-123.4560000000","decimal256":"-123.4560000000"}
+{"decimal128":"0.0000000000","decimal256":"0.0000000000"}
+{"decimal128":"0.0000000000","decimal256":"0.0000000000"}
+{}
 "#,
         );
     }
@@ -967,7 +1049,7 @@ mod tests {
                 Arc::new(arr_names),
             ],
         )
-        .unwrap();
+            .unwrap();
 
         let mut buf = Vec::new();
         {
@@ -1244,7 +1326,7 @@ mod tests {
                     obj.into_iter().filter(|(_, v)| *v != Value::Null).collect(),
                 );
             }
-            assert_eq!(serde_json::from_str::<Value>(r).unwrap(), expected_json,);
+            assert_eq!(serde_json::from_str::<Value>(r).unwrap(), expected_json, );
         }
     }
 
@@ -1269,6 +1351,7 @@ mod tests {
         writer.finish().unwrap();
         assert_eq!(String::from_utf8(writer.into_inner()).unwrap(), "");
     }
+
     #[test]
     fn json_writer_one_row() {
         let mut writer = ArrayWriter::new(vec![] as Vec<u8>);
@@ -1435,7 +1518,7 @@ mod tests {
                     obj.into_iter().filter(|(_, v)| *v != Value::Null).collect(),
                 );
             }
-            assert_eq!(serde_json::from_str::<Value>(r).unwrap(), expected_json,);
+            assert_eq!(serde_json::from_str::<Value>(r).unwrap(), expected_json, );
         }
     }
 }
