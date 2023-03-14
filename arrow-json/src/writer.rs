@@ -238,6 +238,29 @@ fn set_column_by_primitive_type<T>(
         });
 }
 
+fn set_decimal_column<T>(
+    rows: &mut [JsonMap<String, Value>],
+    row_count: usize,
+    array: &ArrayRef,
+    col_name: &str,
+    precision: u8,
+    scale: i8
+) where
+    T: DecimalType
+{
+    let primitive_arr = as_primitive_array::<T>(array);
+
+    rows.iter_mut()
+        .zip(primitive_arr.iter())
+        .take(row_count)
+        .for_each(|(row, maybe_value)| {
+            // when value is null, we simply skip setting the key
+            if let Some(j) = maybe_value {
+                row.insert(col_name.to_string(), Value::String(T::format_decimal(j, precision, scale)));
+            }
+        });
+}
+
 fn set_column_for_json_rows(
     rows: &mut [JsonMap<String, Value>],
     row_count: usize,
@@ -283,6 +306,12 @@ fn set_column_for_json_rows(
         }
         DataType::Utf8 => {
             set_column_by_array_type!(as_string_array, col_name, rows, array, row_count);
+        }
+        DataType::Decimal128(precision, scale) => {
+            set_decimal_column::<Decimal128Type>(rows, row_count, array, col_name, *precision, *scale);
+        }
+        DataType::Decimal256(precision, scale) => {
+            set_decimal_column::<Decimal256Type>(rows, row_count, array, col_name, *precision, *scale);
         }
         DataType::LargeUtf8 => {
             set_column_by_array_type!(
