@@ -16,6 +16,9 @@
   specific language governing permissions and limitations
   under the License.
 -->
+# Fork motivation
+
+The motivation for this fork is to be able to encode Decimal types when working with [datafusion](https://github.com/apache/arrow-datafusion) for [airquery](https://github.com/SirStoke/airquery). We implement json writing support.
 
 # Native Rust implementation of Apache Arrow and Parquet
 
