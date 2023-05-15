@@ -38,7 +38,7 @@ tonic = { version = "0.8", default-features = false, features = ["transport", "c
 bytes = { version = "1", default-features = false }
 prost = { version = "0.11", default-features = false }
 prost-derive = { version = "0.11", default-features = false }
-tokio = { version = "1.0", default-features = false, features = ["macros", "rt", "rt-multi-thread"] }
+tokio = { version = "1.0", default-features = false, features = ["macros", "rt"] }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 
 [package.metadata.docs.rs]
@@ -52,7 +52,7 @@ tls = ["tonic/tls"]
 [dev-dependencies]
 arrow = { version = "34.0.0", path = "../arrow", features = ["prettyprint"] }
 tempfile = "3.3"
-tokio-stream = { version = "0.1", features = ["net"] }
+tokio-stream = { version = "0.1", default-features = false }
 tower = "0.4.13"
 
 [build-dependencies]
